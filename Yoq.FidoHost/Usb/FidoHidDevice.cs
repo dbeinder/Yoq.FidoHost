@@ -104,7 +104,10 @@ namespace Yoq.FidoHost.Usb
         {
             var device = new FidoHidDevice(hidDevice);
             try { await device.InitAsync().ConfigureAwait(false); }
-            catch (FidoException fe) when (fe.Type == FidoError.TokenBusy) { return null; }
+            catch (FidoException fe) when (fe.Type == FidoError.TokenBusy || 
+                                           fe.Type == FidoError.InterruptedIO || 
+                                           fe.Type == FidoError.Timeout) 
+            { return null; }
             return device;
         }
 
@@ -127,7 +130,7 @@ namespace Yoq.FidoHost.Usb
             Capabilities = (FidoHidCapabilities)response[16];
             Name = FidoHidDeviceDb.TryGetName(_hidDevice.Attributes.VendorId, _hidDevice.Attributes.ProductId, out var n) ? n : null;
         }
-
+        
         public int U2FHidProtocolVersion { get; private set; }
         public string HwVersion { get; private set; }
         public string Name { get; private set; }

@@ -37,10 +37,34 @@ namespace Yoq.FidoHost.Test
         static async Task Run(CancellationToken cancel)
         {
             var appId = "foo";
+            
+            Console.WriteLine("Multi Token Mode, (parallel)");
+            try
+            {
+                var regStartX = CryptoLib.U2F.StartRegistration(appId);
+                Console.Write("Registration... ");
+                var regRespX = await FidoUsbToken.RegisterParallel(regStartX, cancel);
+                var deviceRegX = CryptoLib.U2F.FinishRegistration(regStartX, regRespX);
+                Console.WriteLine($"Done [{deviceRegX.GetAttestationCertificate().Subject}]");
+
+                var authStartX = CryptoLib.U2F.StartAuthentication(appId, deviceRegX);
+                Console.Write("Authentication... ");
+                var authRespX = await FidoUsbToken.AuthenticateParallel(authStartX, cancel);
+                var counter = CryptoLib.U2F.FinishAuthentication(authStartX, authRespX, deviceRegX);
+                Console.WriteLine($"Done, Counter: {counter}");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+                Console.ReadKey();
+            }
+            
+            Console.WriteLine("Multi Token Mode test done\n");
+
             try
             {
                 Console.Write("Waiting for tokens... ");
-                var tokens = await FidoUsbToken.WaitForUsbTokens(cancel);
+                var tokens = await FidoUsbToken.WaitForTokens(cancel);
 
                 Console.WriteLine($"Found {tokens.Count} tokens");
 
@@ -120,7 +144,7 @@ namespace Yoq.FidoHost.Test
                 Console.ReadKey();
                 Console.WriteLine();
 
-                tokens = await FidoUsbToken.WaitForUsbTokens(cancel);
+                tokens = await FidoUsbToken.WaitForTokens(cancel);
                 usb = tokens[idx];
 
                 Console.Write("Checking good Keyhandle... ");
@@ -142,14 +166,14 @@ namespace Yoq.FidoHost.Test
                 {
                     var regStart1 = CryptoLib.U2F.StartRegistration(appId);
                     Console.Write("Registration ... ");
-                    var regResp1 = await FidoUsbToken.WaitForUsbTokenAnd(async tk => await tk.RegisterAsync(regStart1, cancel), cancel);
+                    var regResp1 = await FidoUsbToken.WaitForFirstTokenThen(async tk => await tk.RegisterAsync(regStart1, cancel), cancel);
                     var deviceReg1 = CryptoLib.U2F.FinishRegistration(regStart1, regResp1);
                     Console.WriteLine($"Done [{deviceReg1.GetAttestationCertificate().Subject}]");
 
 
                     var authStart1 = CryptoLib.U2F.StartAuthentication(appId, deviceReg1);
                     Console.Write("Authentication... ");
-                    var authResp1 = await FidoUsbToken.WaitForUsbTokenAnd(async tk => await tk.AuthenticateAsync(authStart1, cancel), cancel);
+                    var authResp1 = await FidoUsbToken.WaitForFirstTokenThen(async tk => await tk.AuthenticateAsync(authStart1, cancel), cancel);
                     var counter1 = CryptoLib.U2F.FinishAuthentication(authStart1, authResp1, deviceReg1);
                     Console.WriteLine($"Done, Counter: {counter1}");
                 }
