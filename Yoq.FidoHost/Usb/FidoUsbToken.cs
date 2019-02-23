@@ -44,29 +44,37 @@ namespace Yoq.FidoHost.Usb
                 { }
             }
         }
-        
+
         private static int ParallelDeviceRecheckInterval = 5000;
 
         /// <summary>
         /// Try authenticate on all present tokens in parallel, return the first valid response
         /// </summary>
-        /// <param name="ignoreInvalidKeyHandle">If false, throws on encountering token/authStart mismatch</param>
+        /// <param name="invalidKeyHandleCnt">Reports the number of plugged in tokens, which report that authStart is not valid for them</param>
         /// <returns></returns>
         public static Task<AuthenticateResponse> AuthenticateParallel(StartedAuthentication authStart,
-            CancellationToken cancellationToken, bool ignoreInvalidKeyHandle = true, string facet = null)
-            => RunParallel((tk, ct) => tk.AuthenticateAsync(authStart, ct, true, facet), cancellationToken, ignoreInvalidKeyHandle);
+            CancellationToken cancellationToken, IProgress<int> invalidKeyHandleCnt = null, string facet = null)
+            => RunParallel((tk, ct) => tk.AuthenticateAsync(authStart, ct, true, facet), cancellationToken, invalidKeyHandleCnt);
 
         /// <summary>
         /// Try register on all present tokens in parallel, return the first valid response
         /// </summary>
         public static Task<RegisterResponse> RegisterParallel(StartedRegistration regStart,
             CancellationToken cancellationToken, string facet = null)
-            => RunParallel((tk, ct) => tk.RegisterAsync(regStart, facet, ct), cancellationToken, false);
+            => RunParallel((tk, ct) => tk.RegisterAsync(regStart, facet, ct), cancellationToken);
 
         private static async Task<T> RunParallel<T>(Func<FidoUsbToken, CancellationToken, Task<T>> fn,
-            CancellationToken cancellationToken, bool ignoreInvalidKeyHandle)
+            CancellationToken cancellationToken, IProgress<int> invalidCntReporter = null)
             where T : class
         {
+            var lastInvalidCount = 0;
+            void UpdateInvalidCount(int count)
+            {
+                if (count == lastInvalidCount || invalidCntReporter == null) return;
+                invalidCntReporter.Report(count);
+                lastInvalidCount = count;
+            }
+
             for (; ; cancellationToken.ThrowIfCancellationRequested())
             {
                 var tokens = await WaitForTokens(cancellationToken).ConfigureAwait(false);
@@ -76,23 +84,30 @@ namespace Yoq.FidoHost.Usb
 
                 var tasks = tokens.Select(async tk =>
                 {
-                    try { return await fn(tk, merged.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) { return null; }
+                    try { return (0, await fn(tk, merged.Token).ConfigureAwait(false)); }
+                    catch (OperationCanceledException) { return (0, null); }
                     catch (FidoException fe) when (fe.Type == FidoError.Timeout ||
                                                    fe.Type == FidoError.TokenBusy ||
                                                    fe.Type == FidoError.InterruptedIO)
-                    { return null; }
+                    { return (0, null); }
                     catch (FidoException fe) when (fe.Type == FidoError.InvalidKeyHandle)
-                    { if (ignoreInvalidKeyHandle) return null; throw; }
-                }).ToList();
+                    { return (1, null); }
+                })
+                .Concat(new[] { Task.Delay(500, merged.Token).ContinueWith(_ => (-1, (T)null), merged.Token) })
+                .ToList();
 
+                var invalidKeyHandleCnt = 0;
                 while (tasks.Count > 0)
                 {
                     var first = await Task.WhenAny(tasks).ConfigureAwait(false);
-                    var result = first.Status == TaskStatus.RanToCompletion ? first.Result : null;
-                    if (result != null) return result;
+                    var result = first.Status == TaskStatus.RanToCompletion ? first.Result : (0, null);
+                    if (result.Item2 != null) return result.Item2;
                     tasks.Remove(first);
+
+                    if (result.Item1 == -1) UpdateInvalidCount(invalidKeyHandleCnt);
+                    else invalidKeyHandleCnt += result.Item1;
                 }
+                UpdateInvalidCount(invalidKeyHandleCnt);
             }
         }
 
@@ -122,7 +137,7 @@ namespace Yoq.FidoHost.Usb
             catch (FidoException) { return false; }
             return true;
         }
-        
+
         public override string ToString() => UsbHidToken.ToString();
     }
 }

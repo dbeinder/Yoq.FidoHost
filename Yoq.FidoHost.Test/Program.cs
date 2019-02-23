@@ -18,6 +18,9 @@ namespace Yoq.FidoHost.Test
         private static CancellationTokenSource cts;
         static void Main(string[] args)
         {
+            TaskScheduler.UnobservedTaskException += (o, e) => Console.WriteLine($"UnobservedTaskException: {e.Exception}");
+            AppDomain.CurrentDomain.UnhandledException += (o, e) => Console.WriteLine($"UnhandledException: {e.ExceptionObject}");
+
             cts = new CancellationTokenSource();
             var task = Task.Run(async () => await Run(cts.Token));
             Console.WriteLine("Press ESC to cancel");
@@ -37,7 +40,7 @@ namespace Yoq.FidoHost.Test
         static async Task Run(CancellationToken cancel)
         {
             var appId = "foo";
-            
+
             Console.WriteLine("Multi Token Mode, (parallel)");
             try
             {
@@ -49,7 +52,8 @@ namespace Yoq.FidoHost.Test
 
                 var authStartX = CryptoLib.U2F.StartAuthentication(appId, deviceRegX);
                 Console.Write("Authentication... ");
-                var authRespX = await FidoUsbToken.AuthenticateParallel(authStartX, cancel);
+                var invCnt = new Progress<int>(cnt => Console.WriteLine($"Number of mismatched tokens: {cnt}"));
+                var authRespX = await FidoUsbToken.AuthenticateParallel(authStartX, cancel, invCnt);
                 var counter = CryptoLib.U2F.FinishAuthentication(authStartX, authRespX, deviceRegX);
                 Console.WriteLine($"Done, Counter: {counter}");
             }
@@ -58,7 +62,7 @@ namespace Yoq.FidoHost.Test
                 Console.WriteLine(e);
                 Console.ReadKey();
             }
-            
+
             Console.WriteLine("Multi Token Mode test done\n");
 
             try
