@@ -49,10 +49,10 @@ namespace Yoq.FidoHost.Test
                 var regRespX = await FidoUsbToken.RegisterParallel(regStartX, cancel);
                 var deviceRegX = CryptoLib.U2F.FinishRegistration(regStartX, regRespX);
                 Console.WriteLine($"Done [{deviceRegX.GetAttestationCertificate().Subject}]");
-
+                Thread.Sleep(1000);
                 var authStartX = CryptoLib.U2F.StartAuthentication(appId, deviceRegX);
                 Console.Write("Authentication... ");
-                var invCnt = new Progress<int>(cnt => Console.WriteLine($"Number of mismatched tokens: {cnt}"));
+                var invCnt = new Progress<FidoUsbCount>(cnt => Console.WriteLine($"Connected: {cnt.Connected}, Invalid: {cnt.KeyhandleMismatch}"));
                 var authRespX = await FidoUsbToken.AuthenticateParallel(authStartX, cancel, invCnt);
                 var counter = CryptoLib.U2F.FinishAuthentication(authStartX, authRespX, deviceRegX);
                 Console.WriteLine($"Done, Counter: {counter}");

@@ -53,8 +53,8 @@ namespace Yoq.FidoHost.Usb
         /// <param name="invalidKeyHandleCnt">Reports the number of plugged in tokens, which report that authStart is not valid for them</param>
         /// <returns></returns>
         public static Task<AuthenticateResponse> AuthenticateParallel(StartedAuthentication authStart,
-            CancellationToken cancellationToken, IProgress<int> invalidKeyHandleCnt = null, string facet = null)
-            => RunParallel((tk, ct) => tk.AuthenticateAsync(authStart, ct, true, facet), cancellationToken, invalidKeyHandleCnt);
+            CancellationToken cancellationToken, IProgress<FidoUsbCount> deviceCountReport = null, string facet = null)
+            => RunParallel((tk, ct) => tk.AuthenticateAsync(authStart, ct, true, facet), cancellationToken, deviceCountReport);
 
         /// <summary>
         /// Try register on all present tokens in parallel, return the first valid response
@@ -64,15 +64,19 @@ namespace Yoq.FidoHost.Usb
             => RunParallel((tk, ct) => tk.RegisterAsync(regStart, facet, ct), cancellationToken);
 
         private static async Task<T> RunParallel<T>(Func<FidoUsbToken, CancellationToken, Task<T>> fn,
-            CancellationToken cancellationToken, IProgress<int> invalidCntReporter = null)
+            CancellationToken cancellationToken, IProgress<FidoUsbCount> deviceCountReport = null)
             where T : class
         {
             var lastInvalidCount = 0;
-            void UpdateInvalidCount(int count)
+            var lastDeviceCount = 0;
+
+            void ReportDeviceCount(int devCount, int invalidCnt)
             {
-                if (count == lastInvalidCount || invalidCntReporter == null) return;
-                invalidCntReporter.Report(count);
-                lastInvalidCount = count;
+                if (deviceCountReport == null) return;
+                if (devCount == lastDeviceCount && invalidCnt == lastInvalidCount) return;
+                deviceCountReport.Report(new FidoUsbCount { Connected = devCount, KeyhandleMismatch = invalidCnt });
+                lastInvalidCount = invalidCnt;
+                lastDeviceCount = devCount;
             }
 
             for (; ; cancellationToken.ThrowIfCancellationRequested())
@@ -90,7 +94,8 @@ namespace Yoq.FidoHost.Usb
                                                    fe.Type == FidoError.TokenBusy ||
                                                    fe.Type == FidoError.InterruptedIO)
                     { return (0, null); }
-                    catch (FidoException fe) when (fe.Type == FidoError.InvalidKeyHandle)
+                    catch (FidoException fe) when (fe.Type == FidoError.InvalidKeyHandle ||
+                                                   fe.StatusCode == FidoApduResponse.InvalidLength) //plug up
                     { return (1, null); }
                 })
                 .Concat(new[] { Task.Delay(500, merged.Token).ContinueWith(_ => (-1, (T)null), merged.Token) })
@@ -104,10 +109,10 @@ namespace Yoq.FidoHost.Usb
                     if (result.Item2 != null) return result.Item2;
                     tasks.Remove(first);
 
-                    if (result.Item1 == -1) UpdateInvalidCount(invalidKeyHandleCnt);
+                    if (result.Item1 == -1) ReportDeviceCount(tokens.Count, invalidKeyHandleCnt);
                     else invalidKeyHandleCnt += result.Item1;
                 }
-                UpdateInvalidCount(invalidKeyHandleCnt);
+                ReportDeviceCount(tokens.Count, invalidKeyHandleCnt);
             }
         }
 
@@ -139,5 +144,11 @@ namespace Yoq.FidoHost.Usb
         }
 
         public override string ToString() => UsbHidToken.ToString();
+    }
+
+    public class FidoUsbCount
+    {
+        public int Connected { get; internal set; }
+        public int KeyhandleMismatch { get; internal set; }
     }
 }
