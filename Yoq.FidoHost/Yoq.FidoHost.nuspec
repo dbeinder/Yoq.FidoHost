@@ -13,7 +13,7 @@
     <!--<tags>Tag1 Tag2</tags>-->
     <dependencies>
       <dependency id="hidlibrary" version="3.2.46" />
-      <dependency id="U2F.Core" version="1.0.4" />
+      <dependency id="U2F.Core" version="2.0.1" />
     </dependencies>
   </metadata>
 </package>
